@@ -37,8 +37,8 @@ export const Paper: React.FC<PaperProps> = ({
   const HALF_PAPER = PAPER_WIDTH / 2;
   const BASE_OFFSET_X = HALF_PAPER - PAPER_PADDING_LEFT;
   
-  // Reduced from 120 to 60 to lift paper so text isn't hidden behind the guide
-  const BASE_OFFSET_Y = 60; 
+  // Adjusted to 40 to lift paper higher so text clears the ruler
+  const BASE_OFFSET_Y = 40; 
   
   const carriageTranslateX = BASE_OFFSET_X - (colIndex * CHAR_WIDTH);
 
@@ -111,7 +111,7 @@ export const Paper: React.FC<PaperProps> = ({
       const insertComposition = () => {
           if (!compositionInserted && compositionText) {
               elements.push(
-                  <span key="comp" className="bg-blue-100/50 text-blue-800 border-b-2 border-blue-400 min-w-[10px] inline-block">
+                  <span key="comp" className="bg-blue-100/50 text-blue-800 border-b-2 border-blue-400 min-w-[10px] inline-block align-baseline">
                       {compositionText}
                   </span>
               );

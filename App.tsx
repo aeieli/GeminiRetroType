@@ -22,6 +22,9 @@ const App: React.FC = () => {
   const isComposingRef = useRef(false);
   const [compositionText, setCompositionText] = useState('');
   
+  // Flag to prevent double handling of input after composition end
+  const ignoreNextInputRef = useRef(false);
+  
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // MACHINE SCALE FACTOR
@@ -42,8 +45,6 @@ const App: React.FC = () => {
     for (let i = 0; i < str.length; i++) {
       const code = str.charCodeAt(i);
       // Simple heuristic: CJK characters are usually > 255. 
-      // This maps to the fact that they take ~2x width in typical monospace fonts 
-      // or are displayed as wide glyphs.
       len += code > 255 ? 2 : 1;
     }
     return len;
@@ -74,6 +75,27 @@ const App: React.FC = () => {
     return currentChars.length; // Append
   };
 
+  // Helper: Insert text at the current cursor position
+  const insertTextAtCursor = (textToInsert: string) => {
+      if (!textToInsert) return;
+
+      const newCharObjects: CharData[] = textToInsert.split('').map(c => ({
+          id: Math.random().toString(36).substring(2,9) + Date.now() + Math.random(),
+          char: c,
+          isDeleted: false
+      }));
+
+      setChars(prev => {
+          const next = [...prev];
+          const realInsertIdx = getRealIndex(cursorIndex, prev);
+          next.splice(realInsertIdx, 0, ...newCharObjects);
+          return next;
+      });
+      
+      setCursorIndex(prev => prev + textToInsert.length);
+      triggerTypingEffect(null);
+  };
+
   // --- Input Handling Logic ---
 
   const handleCompositionStart = () => {
@@ -86,44 +108,48 @@ const App: React.FC = () => {
 
   const handleCompositionEnd = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
     isComposingRef.current = false;
-    setCompositionText('');
     
-    // Force a sync of the committed text. 
-    // We manually trigger the input handler with the final value to ensure consistency
-    // especially if the browser blocked the standard 'input' event during composition.
-    const nativeEventMock = { isComposing: false };
-    handleInputChange({
-        target: e.currentTarget,
-        nativeEvent: nativeEventMock
-    } as any);
+    const committedText = e.data; 
+    
+    // Clear preview immediately
+    setCompositionText('');
+
+    // If we have committed text, insert it explicitly.
+    // We use e.data because it is the most reliable source of the final IME string.
+    if (committedText) {
+        insertTextAtCursor(committedText);
+        // Set flag to ignore the subsequent 'input' event which browsers often fire 
+        // with the same text change, preventing double insertion.
+        ignoreNextInputRef.current = true;
+    }
   };
 
   // Handle text insertion (typing) and deletion
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (isGhostWriting) return;
     
-    // If the browser indicates we are strictly in the middle of composing, 
-    // we usually skip committing to the main 'chars' array to avoid partial inputs.
-    // However, we rely on handleCompositionEnd to fire the final sync.
+    // If we just handled a composition commit manually, skip the redundant input event
+    if (ignoreNextInputRef.current) {
+        ignoreNextInputRef.current = false;
+        return;
+    }
+
+    // If we are composing (and not ending), do not commit yet.
     if ((e.nativeEvent as any).isComposing || isComposingRef.current) {
         return;
     }
 
     const newVal = e.target.value;
     const newCursorPos = e.target.selectionStart;
-    
-    // Compare newVal vs activeString to detect changes
     const oldVal = activeString;
     
     // 1. Deletions
     if (newVal.length < oldVal.length) {
         const diff = oldVal.length - newVal.length;
-        // Standard backspace usually occurs at the new cursor position
         const deleteStartIndex = newCursorPos; 
         
         setChars(prev => {
             const next = [...prev];
-            // Mark characters as deleted
             for (let i = 0; i < diff; i++) {
                 const activeIdxToDelete = deleteStartIndex + i;
                 const realIdx = getRealIndex(activeIdxToDelete, prev);
@@ -133,31 +159,35 @@ const App: React.FC = () => {
             }
             return next;
         });
+        setCursorIndex(newCursorPos);
         triggerTypingEffect('Backspace');
     } 
-    // 2. Insertions (including Multi-char pastes or Chinese Commit)
+    // 2. Insertions (Standard Typing or Paste)
     else if (newVal.length > oldVal.length) {
         const diff = newVal.length - oldVal.length;
         const insertStartIndex = newCursorPos - diff;
         const insertedText = newVal.substring(insertStartIndex, newCursorPos);
         
-        const realInsertIdx = getRealIndex(insertStartIndex, chars);
-        
+        // Use helper, but manually update cursor locally since insertTextAtCursor uses state
         const newCharObjects: CharData[] = insertedText.split('').map(c => ({
-           id: Math.random().toString(36).substring(2,9) + Date.now(),
+           id: Math.random().toString(36).substring(2,9) + Date.now() + Math.random(),
            char: c,
            isDeleted: false
         }));
 
         setChars(prev => {
             const next = [...prev];
+            const realInsertIdx = getRealIndex(insertStartIndex, prev);
             next.splice(realInsertIdx, 0, ...newCharObjects);
             return next;
         });
+        
+        setCursorIndex(newCursorPos);
         triggerTypingEffect(null);
+    } else {
+        // Just cursor movement or no-op
+        setCursorIndex(newCursorPos);
     }
-
-    setCursorIndex(newCursorPos);
   };
 
   const triggerTypingEffect = (keyCode: string | null) => {
@@ -170,7 +200,10 @@ const App: React.FC = () => {
   };
 
   const handleSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
-      setCursorIndex(e.currentTarget.selectionStart);
+      // Only update cursor if we are not composing to avoid jumping during IME
+      if (!isComposingRef.current) {
+          setCursorIndex(e.currentTarget.selectionStart);
+      }
   };
 
   // Handle virtual key clicks (Keyboard UI)
@@ -182,10 +215,8 @@ const App: React.FC = () => {
     
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-    const value = textarea.value;
-
+    
     if (key.type === KeyType.BACKSPACE) {
-        // Logic mirrors physical keyboard backspace
         if (start === end && start > 0) {
              setChars(prev => {
                  const next = [...prev];
@@ -207,7 +238,6 @@ const App: React.FC = () => {
              setCursorIndex(start);
         }
         triggerTypingEffect('Backspace');
-
     } else {
         let charToInsert = '';
         if (key.type === KeyType.ENTER) charToInsert = '\n';
@@ -216,7 +246,7 @@ const App: React.FC = () => {
         
         if (charToInsert) {
             const activeIdx = start;
-            const newChar: CharData = { id: Date.now().toString(), char: charToInsert, isDeleted: false };
+            const newChar: CharData = { id: Date.now().toString() + Math.random(), char: charToInsert, isDeleted: false };
             
             setChars(prev => {
                 const next = [...prev];
@@ -237,7 +267,6 @@ const App: React.FC = () => {
       id: Date.now().toString(),
       content: chars,
       rotation: getRandomRotation(),
-      // Generate higher up since the machine is small now
       ...getRandomPosition(window.innerWidth, window.innerHeight * 0.6), 
       timestamp: Date.now(),
       clipPath: generateJaggedEdge(Date.now(), 'both')
