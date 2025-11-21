@@ -283,8 +283,9 @@ const App: React.FC = () => {
     setStickers(prev => prev.filter(s => s.id !== id));
   };
 
-  const handleUpdateStickerPosition = (id: string, x: number, y: number) => {
-      setStickers(prev => prev.map(s => s.id === id ? { ...s, x, y } : s));
+  // Updated to handle both position and rotation
+  const handleUpdateSticker = (id: string, updates: Partial<Sticker>) => {
+      setStickers(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
   };
 
   // AI Ghost Writer
@@ -351,7 +352,7 @@ const App: React.FC = () => {
       <StickerWall 
         stickers={stickers} 
         onRemoveSticker={handleRemoveSticker} 
-        onUpdateStickerPosition={handleUpdateStickerPosition}
+        onUpdateSticker={handleUpdateSticker}
       />
 
       {/* Main Machine UI - Scaled Down */}

@@ -58,14 +58,15 @@ export const Paper: React.FC<PaperProps> = ({
     // Adjust delta by scale so mouse movement maps 1:1 to object movement visually
     const deltaY = (clientY - dragStartY) / scale;
     
-    if (deltaY < 0) {
-      setOffsetY(deltaY);
-    }
+    // Allow bidirectional movement to follow mouse (elastic feel)
+    setOffsetY(deltaY);
   };
 
   const handleMouseUp = () => {
     if (!isDragging || isTearing) return;
-    if (Math.abs(offsetY) > TEAR_THRESHOLD) {
+    
+    // Tearing happens when pulled UP significantly (negative deltaY)
+    if (offsetY < -TEAR_THRESHOLD) {
       setIsTearing(true);
       setTimeout(() => {
         onTear();
@@ -73,6 +74,7 @@ export const Paper: React.FC<PaperProps> = ({
         setOffsetY(0);
       }, 400);
     } else {
+      // Snap back
       setOffsetY(0);
     }
     setIsDragging(false);

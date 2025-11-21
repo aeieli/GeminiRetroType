@@ -4,35 +4,63 @@ import { Sticker } from '../types';
 interface StickerWallProps {
   stickers: Sticker[];
   onRemoveSticker: (id: string) => void;
-  onUpdateStickerPosition?: (id: string, x: number, y: number) => void;
+  onUpdateSticker: (id: string, updates: Partial<Sticker>) => void;
 }
 
-export const StickerWall: React.FC<StickerWallProps> = ({ stickers, onRemoveSticker, onUpdateStickerPosition }) => {
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const dragOffsetRef = useRef<{x: number, y: number}>({ x: 0, y: 0 });
+export const StickerWall: React.FC<StickerWallProps> = ({ stickers, onRemoveSticker, onUpdateSticker }) => {
+  const [activeSticker, setActiveSticker] = useState<{ id: string, mode: 'MOVE' | 'ROTATE' } | null>(null);
+  
+  // Ref to track initial click position and initial values
+  const dragStartRef = useRef<{x: number, y: number, initialRotation: number, initialX: number, initialY: number}>({ 
+      x: 0, y: 0, initialRotation: 0, initialX: 0, initialY: 0 
+  });
 
-  const handleMouseDown = (e: React.MouseEvent, id: string, x: number, y: number) => {
-    e.stopPropagation(); // Prevent removing or other clicks
-    if (!onUpdateStickerPosition) return;
+  const handleMouseDown = (e: React.MouseEvent, sticker: Sticker) => {
+    e.stopPropagation(); 
+    if (!onUpdateSticker) return;
 
-    setDraggedId(id);
-    dragOffsetRef.current = {
-        x: e.clientX - x,
-        y: e.clientY - y
+    // Detect Button: 0 = Left (Move), 2 = Right (Rotate)
+    const mode = e.button === 2 ? 'ROTATE' : 'MOVE';
+    
+    setActiveSticker({ id: sticker.id, mode });
+    
+    dragStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        initialX: sticker.x,
+        initialY: sticker.y,
+        initialRotation: sticker.rotation
     };
   };
 
+  // Prevent default context menu for right click
+  const handleContextMenu = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+  };
+
   useEffect(() => {
-      if (!draggedId || !onUpdateStickerPosition) return;
+      if (!activeSticker || !onUpdateSticker) return;
 
       const handleMouseMove = (e: MouseEvent) => {
-          const newX = e.clientX - dragOffsetRef.current.x;
-          const newY = e.clientY - dragOffsetRef.current.y;
-          onUpdateStickerPosition(draggedId, newX, newY);
+          const dx = e.clientX - dragStartRef.current.x;
+          const dy = e.clientY - dragStartRef.current.y;
+
+          if (activeSticker.mode === 'MOVE') {
+              const newX = dragStartRef.current.initialX + dx;
+              const newY = dragStartRef.current.initialY + dy;
+              onUpdateSticker(activeSticker.id, { x: newX, y: newY });
+          } else if (activeSticker.mode === 'ROTATE') {
+              // Simple mapping: horizontal drag controls rotation
+              // Sensitivity: 1 pixel = 0.5 degrees
+              const rotationDelta = dx * 0.5;
+              const newRotation = dragStartRef.current.initialRotation + rotationDelta;
+              onUpdateSticker(activeSticker.id, { rotation: newRotation });
+          }
       };
 
       const handleMouseUp = () => {
-          setDraggedId(null);
+          setActiveSticker(null);
       };
 
       window.addEventListener('mousemove', handleMouseMove);
@@ -42,7 +70,7 @@ export const StickerWall: React.FC<StickerWallProps> = ({ stickers, onRemoveStic
           window.removeEventListener('mousemove', handleMouseMove);
           window.removeEventListener('mouseup', handleMouseUp);
       };
-  }, [draggedId, onUpdateStickerPosition]);
+  }, [activeSticker, onUpdateSticker]);
 
   return (
     <div className="absolute inset-0 z-0 pointer-events-none h-full w-full">
@@ -53,17 +81,19 @@ export const StickerWall: React.FC<StickerWallProps> = ({ stickers, onRemoveStic
             absolute p-6 pt-8 pb-8 shadow-[0_10px_30px_rgba(0,0,0,0.2)] 
             transition-transform duration-75
             cursor-grab active:cursor-grabbing pointer-events-auto group bg-[#fdfbf7]
-            ${draggedId === sticker.id ? 'z-50 scale-105 shadow-2xl' : 'hover:scale-105 hover:z-40'}
+            ${activeSticker?.id === sticker.id ? 'z-50 scale-105 shadow-2xl' : 'hover:scale-105 hover:z-40'}
           `}
           style={{
             top: `${sticker.y}px`,
             left: `${sticker.x}px`,
-            transform: `rotate(${sticker.rotation}deg) ${draggedId === sticker.id ? 'scale(1.05)' : 'scale(1)'}`,
+            // Apply local transform for rotation
+            transform: `rotate(${sticker.rotation}deg) ${activeSticker?.id === sticker.id ? 'scale(1.05)' : 'scale(1)'}`,
             width: '280px',
             clipPath: sticker.clipPath, 
             backgroundImage: 'url("https://www.transparenttextures.com/patterns/cream-paper.png")',
           }}
-          onMouseDown={(e) => handleMouseDown(e, sticker.id, sticker.x, sticker.y)}
+          onMouseDown={(e) => handleMouseDown(e, sticker)}
+          onContextMenu={handleContextMenu}
         >
           {/* Tape visual */}
           <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-12 h-6 bg-yellow-200/40 backdrop-blur-sm shadow-sm rotate-2"></div>
@@ -72,6 +102,7 @@ export const StickerWall: React.FC<StickerWallProps> = ({ stickers, onRemoveStic
           <button 
             className="absolute top-2 right-2 w-6 h-6 bg-red-500/20 rounded-full text-red-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/40 z-20"
             onClick={(e) => { e.stopPropagation(); onRemoveSticker(sticker.id); }}
+            onMouseDown={(e) => e.stopPropagation()} // Prevent starting drag on delete
             title="Remove"
           >
             ×
